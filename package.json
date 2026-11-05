@@ -1,0 +1,10 @@
+{
+  "name": "emotional-baggage-fm",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node tests.cjs && node server-tests.mjs"
+  },
+  "engines": {"node": ">=20"}
+}
