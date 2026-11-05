@@ -49,7 +49,11 @@ export function createHandler(env=process.env,providerFetch=fetch){
   const input=kind==='meaning'?{meaning:data.meaning}:{personalityId:data.personalityId,meaning:data.meaning,interpretation:String(data.interpretation||'').slice(0,600),listeningTime:String(data.listeningTime||'').slice(0,20),player:String(data.player||'').slice(0,20),songs:data.songs.map(s=>({title:String(s.title||'').slice(0,100),artist:String(s.artist||'').slice(0,80)})),answers:data.answers.map(a=>({type:a.type,action:String(a.action||'').slice(0,120),reason:String(a.reason||'').slice(0,150)})),tie:IDS[data.tie]?data.tie:null};
   try{
    const response=await providerFetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:'Bearer '+env.OPENAI_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({model:env.OPENAI_MODEL||'gpt-4.1-mini',instructions:prompts[kind],input:JSON.stringify(input),max_output_tokens:800,store:false,text:{format:{type:'json_object'}}}),signal:AbortSignal.timeout(20000)});
-   if(!response.ok)return send(502,{error:'The liner-note writer is unavailable. Please try again.'});
+  if (!response.ok) {
+  const body = await response.json().catch(() => ({}));
+  console.error("OpenAI request failed", response.status, body.error?.code);
+  return send(502, { error: "The liner-note writer is unavailable. Please try again." });
+}
    const body=await response.json();const text=(body.output||[]).flatMap(item=>item.content||[]).filter(item=>item.type==='output_text').map(item=>item.text).join('');
    const out=JSON.parse(text);if(!validOutput(kind,out,data.personalityId))throw Error('Invalid output');return send(200,out);
   }catch{return send(502,{error:'Your answers are safe. Please retry your liner notes.'});}
