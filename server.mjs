@@ -1,5 +1,6 @@
 // Node 20+. Serves the quiz and holds the API key on the server.
 import http from 'node:http';
+import {createFanHandler} from './fan-routes.mjs';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -17,6 +18,7 @@ export function validOutput(kind,out,id){
 }
 export function createHandler(env=process.env,providerFetch=fetch){
  const limits=new Map();
+ const handleFan=createFanHandler(env,providerFetch);
  return async(req,res)=>{
   const origin=req.headers.origin;
   const configured=env.FRONTEND_ORIGIN;
@@ -27,20 +29,21 @@ export function createHandler(env=process.env,providerFetch=fetch){
   const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
   const route=req.url.split('?')[0];
   if(req.method==='GET'){
-   if(route==='/health')return send(200,{ok:true,aiConfigured:Boolean(env.OPENAI_API_KEY)});
+   if(route==='/health')return send(200,{ok:true,aiConfigured:Boolean(env.OPENAI_API_KEY),fanCheckEnabled:true});
    if(route==='/config.js'){res.writeHead(200,{'Content-Type':'text/javascript','Cache-Control':'no-store'});return res.end('window.QUIZ_CONFIG = { backend: window.location.origin };');}
-   const allowed={'/':'index.html','/index.html':'index.html','/style.css':'style.css','/sketch.js':'sketch.js'};
+   const allowed={'/':'index.html','/index.html':'index.html','/style.css':'style.css','/sketch.js':'sketch.js','/fan-check.js':'fan-check.js','/p5.min.js':'p5.min.js'};
    if(!allowed[route])return send(404,{error:'Not found'});
-   try{const file=allowed[route];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.css')?'text/css':'text/javascript'});return res.end(await readFile(path.join(root,file)));}catch{return send(500,{error:'Could not load quiz'});}
+   try{const file=allowed[route];const contents=await readFile(path.join(root,file));res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.css')?'text/css':'text/javascript'});return res.end(contents);}catch{return send(500,{error:'Could not load quiz'});}
   }
   if(origin&&configured&&origin!==configured&&!sameOrigin)return send(403,{error:'Origin not allowed'});
   if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
-  if(req.method!=='POST'||!['/api/meaning','/api/result'].includes(route))return send(404,{error:'Not found'});
+  if(req.method!=='POST'||!['/api/meaning','/api/result','/api/fan/question','/api/fan/answer'].includes(route))return send(404,{error:'Not found'});
   const now=Date.now();for(const [ip,entry]of limits)if(now-entry.time>60000)limits.delete(ip);
   const ip=req.socket.remoteAddress;const limit=limits.get(ip)||{time:now,count:0};limits.set(ip,limit);
   // Several classmates can share a campus Wi-Fi / reverse-proxy address.
   if(++limit.count>Number(env.REQUESTS_PER_MINUTE||120))return send(429,{error:'The studio is busy. Please try again in a minute.'});
   let data;try{let raw='';for await(const part of req){raw+=part;if(Buffer.byteLength(raw)>10000)return send(413,{error:'Input too long'});}data=JSON.parse(raw);}catch{return send(400,{error:'Invalid JSON'});}
+  if(route.startsWith('/api/fan/'))return handleFan(route,data,send);
   const kind=route.split('/').pop();
   if(!data||typeof data.meaning!=='string'||data.meaning.length>1000)return send(400,{error:'Invalid note'});
   if(kind==='result'&&(!IDS.includes(data.personalityId)||!Array.isArray(data.answers)||data.answers.length!==3||!data.answers.every(a=>a&&Number.isInteger(a.type)&&a.type>=-1&&a.type<5)||!Array.isArray(data.songs)||data.songs.length<3||data.songs.length>5))return send(400,{error:'Incomplete quiz result'});
